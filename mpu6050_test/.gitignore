@@ -1,0 +1,4 @@
+sdkconfig*
+compile_commands.json
+.pio
+.cache
