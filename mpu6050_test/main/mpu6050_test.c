@@ -19,6 +19,7 @@ void app_main(void)
         printf("gyro_xout:%d\t;", measurement_out.gyro_out.gyro_xout);
         printf("gyro_yout:%d\t;", measurement_out.gyro_out.gyro_yout);
         printf("gyro_zout:%d;\n", measurement_out.gyro_out.gyro_zout);
+        printf("temp:%d;\n", measurement_out.temp_out.temp_xout);
         printf("cnt:%d\n", cnt++);
         vTaskDelay(100 / portTICK_PERIOD_MS); 
     }

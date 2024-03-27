@@ -2,18 +2,18 @@
 
 
 static const uint8_t mpu6050_init_cmd[11][2] = {
-    {0x6B, 0x80}, // PWR_MGMT_1, DEVICE_RESET  
+    {MPU6050_RA_PWR_MGMT_1, 0x80}, // PWR_MGMT_1, DEVICE_RESET  
     // need wait 
-    {0x6B, 0x00}, // cleat SLEEP
-    {0x1B, 0x18}, // Gyroscope Full Scale Range = ± 2000 °/s
-    {0x1C, 0x00}, // Accelerometer Full Scale Range = ± 2g 
-    {0x38, 0x00}, // Interrupt Enable.disenable 
-    {0x6A, 0x00}, // User Control.auxiliary I2C are logically driven by the primary I2C bus
-    {0x23, 0x00}, // FIFO Enable.disenable  
-    {0x19, 0x63}, // Sample Rate Divider.Sample Rate = 1KHz / (1 + 99)  
-    {0x1A, 0x13}, // EXT_SYNC_SET = GYRO_XOUT_L[0]; Bandwidth = 3
-    {0x6B, 0x01}, // Power Management 1.PLL with X axis gyroscope reference
-    {0x6C, 0x00}  // Power Management 2
+    {MPU6050_RA_PWR_MGMT_1, 0x00}, // cleat SLEEP
+    {MPU6050_RA_GYRO_CONFIG, 0x18}, // Gyroscope Full Scale Range = ± 2000 °/s
+    {MPU6050_RA_ACCEL_CONFIG, 0x00}, // Accelerometer Full Scale Range = ± 2g 
+    {MPU6050_RA_INT_ENABLE, 0x00}, // Interrupt Enable.disenable 
+    {MPU6050_RA_USER_CTRL, 0x00}, // User Control.auxiliary I2C are logically driven by the primary I2C bus
+    {MPU6050_RA_FIFO_EN, 0x00}, // FIFO Enable.disenable  
+    {MPU6050_RA_SMPLRT_DIV, 0x63}, // Sample Rate Divider.Sample Rate = 1KHz / (1 + 99)  
+    {MPU6050_RA_CONFIG, 0x13}, // EXT_SYNC_SET = GYRO_XOUT_L[0]; Bandwidth = 3
+    {MPU6050_RA_PWR_MGMT_1, 0x01}, // Power Management 1.PLL with X axis gyroscope reference
+    {MPU6050_RA_PWR_MGMT_2, 0x00}  // Power Management 2
 };
 
 static esp_err_t  i2c_master_read_slave(i2c_port_t i2c_num, uint8_t *reg_addr, uint8_t *data_rd, size_t size)
