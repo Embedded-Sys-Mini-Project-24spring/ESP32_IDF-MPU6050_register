@@ -16,7 +16,7 @@ static const uint8_t mpu6050_init_cmd[11][2] = {
     {MPU6050_RA_PWR_MGMT_2, 0x00}  // Power Management 2
 };
 
-static esp_err_t  i2c_master_read_slave(i2c_port_t i2c_num, uint8_t *reg_addr, uint8_t *data_rd, size_t size)
+static esp_err_t  i2c_master_read_slave(i2c_port_t i2c_num, uint8_t reg_addr, uint8_t *data_rd, size_t size)
 {
     if (size == 0) {
         return ESP_OK;
@@ -86,7 +86,7 @@ esp_err_t mpu6050_init()
 measurement_out_t mpu6050_get_value()
 {
     uint8_t *measurement_bytes_out = (uint8_t *)malloc(14);
-    i2c_master_read_slave(MPU6050_I2C_PORT_NUM, 0x3B, measurement_bytes_out, 14);
+    i2c_master_read_slave(MPU6050_I2C_PORT_NUM, MPU6050_RA_ACCEL_XOUT_H, measurement_bytes_out, 14);
     measurement_out_t measurement_out = {
         .accel_out.accel_xout = (int16_t)(measurement_bytes_out[0]<<8 | measurement_bytes_out[1]),
         .accel_out.accel_yout = (int16_t)(measurement_bytes_out[2]<<8 | measurement_bytes_out[3]),
@@ -96,5 +96,7 @@ measurement_out_t mpu6050_get_value()
         .gyro_out.gyro_yout = (int16_t)(measurement_bytes_out[10]<<8 | measurement_bytes_out[11]),
         .gyro_out.gyro_zout = (int16_t)(measurement_bytes_out[12]<<8 | measurement_bytes_out[13]),
     };
+    // need to free memory 
+    free(measurement_bytes_out);
     return measurement_out;
 }
