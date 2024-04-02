@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "mpu6050_driver.h"
 #include "freertos/FreeRTOS.h"
+#include "smoothing_filter.h"
 
 
 void app_main(void)

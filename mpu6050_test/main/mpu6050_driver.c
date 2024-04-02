@@ -1,5 +1,9 @@
-#include "mpu6050_driver.h"  
+#include "mpu6050_driver.h"
+#include "esp_timer.h"
 
+esp_timer_handle_t i2cTimerHandle;
+
+void timerCallback(void* arg);
 
 static const uint8_t mpu6050_init_cmd[11][2] = {
     {MPU6050_RA_PWR_MGMT_1, 0x80}, // PWR_MGMT_1, DEVICE_RESET  
@@ -77,6 +81,18 @@ esp_err_t mpu6050_init()
             vTaskDelay(500 / portTICK_PERIOD_MS);
     }
     printf("mpu6050_init_cmd: %d \n", esp_err);
+
+    printf("Configuring timer for periodic measurements\n");
+    esp_timer_create_args_t i2cTimerArgs;
+    i2cTimerArgs.name = "I2C Data Collection Timer";
+    i2cTimerArgs.dispatch_method = ESP_TIMER_TASK;
+    i2cTimerArgs.callback = timerCallback;
+
+    esp_timer_create( &i2cTimerArgs, &i2cTimerHandle );
+
+    // Should configure the timer for every 1ms
+    esp_timer_start_periodic( i2cTimerHandle, 10000 );
+
     return esp_err;
 }
 
@@ -99,4 +115,9 @@ measurement_out_t mpu6050_get_value()
     // need to free memory 
     free(measurement_bytes_out);
     return measurement_out;
+}
+
+void timerCallback(void* arg)
+{
+    printf("In the I2C timer call back\n");
 }

@@ -1,5 +1,5 @@
-#include "esp_err.h"  
-#include "driver/i2c.h" 
+#include "esp_err.h"
+#include "driver/i2c.h"
 
 #define MPU6050_I2C_SDA 19
 #define MPU6050_I2C_SCL 18

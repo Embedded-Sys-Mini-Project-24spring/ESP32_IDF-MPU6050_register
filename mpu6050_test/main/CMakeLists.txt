@@ -1,3 +1,4 @@
-idf_component_register(SRCS "mpu6050_driver.c" "mpu6050_test.c"
-                    INCLUDE_DIRS ".")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+idf_component_register(SRCS "mpu6050_test.c" "mpu6050_driver.c" "smoothing_filter.c"
+                    INCLUDE_DIRS "."
+                    REQUIRES esp_timer driver)
+                    
