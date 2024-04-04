@@ -6,4 +6,4 @@
 
 // FilterData will return the filtered results of the provided
 // data. The provided data must be 5 samples deep.
-void FilterData( uint16_t* data, uint8_t dataSize, uint16_t* filteredData );
+void FilterData( int16_t* data, uint8_t dataSize, int16_t* filteredData );
