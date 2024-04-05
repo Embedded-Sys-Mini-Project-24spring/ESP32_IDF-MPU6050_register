@@ -4,9 +4,11 @@
 
 #define IMU_DATA_SIZE_BYTES 14
 #define BUFFER_SAMPLES 5
-#define OFFSET_LOOP 1000
-#define ACCEL_THRESHOLD 100
-#define GYRO_THRESHOLD 7
+#define OFFSET_LOOP 200
+#define ACCEL_THRESHOLD 50
+#define GYRO_THRESHOLD 4
+#define GYRO_LSB_SENSITIVITY  0x83 // Pulled from MPU6050 datasheet (Fixed point representation)
+#define ACCEL_LSB_SENSITIVITY 16384 // Pulled from MPU6050 datasheet
 
 // Handle for the timer that is used to sample the IMU data
 esp_timer_handle_t i2cTimerHandle;
@@ -16,9 +18,9 @@ uint8_t imu_data[IMU_DATA_SIZE_BYTES];
 
 // Buffers to hold 5 samples of data from IMU in order to do
 // the filtering
-int16_t accel_x_buffer[BUFFER_SAMPLES] = {};
-int16_t accel_y_buffer[BUFFER_SAMPLES] ={};
-int16_t accel_z_buffer[BUFFER_SAMPLES] = {};
+double accel_x_buffer[BUFFER_SAMPLES] = {};
+double accel_y_buffer[BUFFER_SAMPLES] ={};
+double accel_z_buffer[BUFFER_SAMPLES] = {};
 int16_t gyro_x_buffer[BUFFER_SAMPLES] = {};
 int16_t gyro_y_buffer[BUFFER_SAMPLES] = {};
 int16_t gyro_z_buffer[BUFFER_SAMPLES] = {};
@@ -28,7 +30,6 @@ int16_t temp_data_buffer[BUFFER_SAMPLES] = {};
 int16_t gyro_x_offset = 0;
 int16_t gyro_y_offset = 0;
 int16_t gyro_z_offset = 0;
-int16_t temp_data_offset = 0;
 
 // The final acceleration values that can be used for
 // calculations
@@ -36,15 +37,9 @@ int16_t accel_x_output;
 int16_t accel_y_output;
 int16_t accel_z_output;
 
-// The filtered accelerations data from the IMU
-int16_t accel_x_output_filtered;
-int16_t accel_y_output_filtered;
-int16_t accel_z_output_filtered;
-
-// Previous run's filtered acceleration value
-int16_t accel_x_output_old;
-int16_t accel_y_output_old;
-int16_t accel_z_output_old;
+int16_t accel_x_scale_factor = ACCEL_LSB_SENSITIVITY;
+int16_t accel_y_scale_factor = ACCEL_LSB_SENSITIVITY;
+int16_t accel_z_scale_factor;
 
 // Final output acceleration values that can be used in
 // calculations
@@ -59,7 +54,7 @@ static const uint8_t mpu6050_init_cmd[11][2] = {
     //{MPU6050_RA_PWR_MGMT_1, 0x80}, // PWR_MGMT_1, DEVICE_RESET  
     // need wait 
     {MPU6050_RA_PWR_MGMT_1, 0x00}, // cleat SLEEP
-    {MPU6050_RA_GYRO_CONFIG, 0x18}, // Gyroscope Full Scale Range = ± 2000 °/s
+    {MPU6050_RA_GYRO_CONFIG, 0x08}, // Gyroscope Full Scale Range = ± 500 °/s
     {MPU6050_RA_ACCEL_CONFIG, 0x00}, // Accelerometer Full Scale Range = ± 2g 
     {MPU6050_RA_INT_ENABLE, 0x00}, // Interrupt Enable.disenable 
     {MPU6050_RA_USER_CTRL, 0x00}, // User Control.auxiliary I2C are logically driven by the primary I2C bus
@@ -124,10 +119,12 @@ esp_err_t mpu6050_init()
     esp_err = i2c_driver_install(MPU6050_I2C_PORT_NUM, I2C_MODE_MASTER, 0, 0, 0);
     printf("i2c_driver_install: %d \n", esp_err);
 
+    // Set up the reset commad for the IMU
     uint8_t reset_command[1][2] = {{MPU6050_RA_PWR_MGMT_1, 0x80}};
-
     esp_err = i2c_master_write_slave(MPU6050_I2C_PORT_NUM, reset_command, 2);
 
+    // The datasheet says to wait until the reset register is cleared. But just to make it easy
+    // I just used a delay to give some time before moving on
     vTaskDelay(200 / portTICK_PERIOD_MS);
 
     for (size_t i = 0; i < 11 && esp_err == ESP_OK; i++)
@@ -138,38 +135,83 @@ esp_err_t mpu6050_init()
     }
     printf("mpu6050_init_cmd: %d \n", esp_err);
 
+    // Delay following the initial commands to give time to settle
+    vTaskDelay(200 / portTICK_PERIOD_MS);
+
     // Following settup we should find the offset
     int64_t gyro_x_offset_temp = 0;
     int64_t gyro_y_offset_temp = 0;
     int64_t gyro_z_offset_temp = 0;
-    int64_t temp_data_offset_temp = 0;
 
-    vTaskDelay(200 / portTICK_PERIOD_MS);
+    printf("Please hold IMU still while calibrating gyros...\n");
 
+    // Get a bunch of gyro samples and take the average whle holding everything stil in order find the
+    // initial bias of the gyros
     for( unsigned int i = 0; i < OFFSET_LOOP && esp_err == ESP_OK; ++i )
     {
-        esp_err = i2c_master_read_slave( MPU6050_I2C_PORT_NUM, MPU6050_RA_ACCEL_XOUT_H, imu_data, 14 );
+        esp_err = i2c_master_read_slave( MPU6050_I2C_PORT_NUM, MPU6050_RA_GYRO_XOUT_H, imu_data, 6 );
         
         if( esp_err == ESP_OK )
         {
-            temp_data_offset_temp += (int16_t)(imu_data[6]<<8 | imu_data[7]);
-            gyro_x_offset_temp += (int16_t)(imu_data[8]<<8 | imu_data[9]);
-            gyro_y_offset_temp += (int16_t)(imu_data[10]<<8 | imu_data[11]);
-            gyro_z_offset_temp += (int16_t)(imu_data[12]<<8 | imu_data[13]);
+            gyro_x_offset_temp += (int16_t)(imu_data[0]<<8 | imu_data[1]);
+            gyro_y_offset_temp += (int16_t)(imu_data[2]<<8 | imu_data[3]);
+            gyro_z_offset_temp += (int16_t)(imu_data[4]<<8 | imu_data[5]);
         }
     }
 
-    temp_data_offset = (int16_t)(temp_data_offset_temp/OFFSET_LOOP);
     gyro_x_offset = (int16_t)(gyro_x_offset_temp/OFFSET_LOOP);
     gyro_y_offset = (int16_t)(gyro_y_offset_temp/OFFSET_LOOP);
     gyro_z_offset = (int16_t)(gyro_z_offset_temp/OFFSET_LOOP);
 
-    printf("temp_data_offset: %d\n", temp_data_offset);
-    printf("gyro_x_offset: %d\n", gyro_x_offset);
-    printf("gyro_y_offset: %d\n", gyro_y_offset);
-    printf("gyro_z_offset: %d\n", gyro_z_offset);
+    // Calibrate the z axis for the accelerometer
+    printf("Please place z-axis of IMU upwards and hold steady...\n");
 
-    printf("Configuring timer for periodic measurements\n");
+    // Delay to give user time to orient imu and be steady
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+
+    // Grab a bunch of samples that can be averaged and used for the returned data in this orientation
+    int64_t temp_accel_z_data_upwards = 0;
+    for( unsigned int i = 0; i < OFFSET_LOOP && esp_err == ESP_OK; ++i )
+    {
+        esp_err = i2c_master_read_slave( MPU6050_I2C_PORT_NUM, MPU6050_RA_ACCEL_ZOUT_H, imu_data, 2 );
+        
+        if( esp_err == ESP_OK )
+        {
+            temp_accel_z_data_upwards += (int16_t)(imu_data[0]<<8 | imu_data[1]);
+        }
+    }
+    temp_accel_z_data_upwards = temp_accel_z_data_upwards/OFFSET_LOOP;
+
+    printf("Please place z-axis of IMU downwards and hold steady...\n");
+
+    // Delay to give user time to orient imu and be steady
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+    // Grab a bunch of samples that can be averaged and used for the returned data in this orientation
+    int64_t temp_accel_z_data_downwards = 0;
+    for( unsigned int i = 0; i < OFFSET_LOOP && esp_err == ESP_OK; ++i )
+    {
+        esp_err = i2c_master_read_slave( MPU6050_I2C_PORT_NUM, MPU6050_RA_ACCEL_ZOUT_H, imu_data, 2 );
+        
+        if( esp_err == ESP_OK )
+        {
+            temp_accel_z_data_downwards += (int16_t)(imu_data[0]<<8 | imu_data[1]);
+        }
+    }
+    temp_accel_z_data_downwards = temp_accel_z_data_downwards/OFFSET_LOOP;
+
+    // With a perfect device the two positions that the IMU was held in would return a value of +/-1g for
+    // the acceleration in the z-axis. Of course nothing is perfect and there is inherent error in the
+    // device. To account for this we can calculate the actual range of values (or scaling factor) for our
+    // device. Since the difference betwen the two positions is 2g we can divide that by the distance between
+    // the two read values to obtain that scalling factor. NOTE: I used difference/2 in this case to avoid a
+    // decimal number. This value can be divided by our read values in the future to obtain the same result.
+    accel_z_scale_factor = (int16_t)((temp_accel_z_data_downwards-temp_accel_z_data_upwards)/2);
+
+    // Get rid of any negative sign
+    accel_z_scale_factor = (accel_z_scale_factor < 0) ? (-1*accel_z_scale_factor) : accel_z_scale_factor;
+
+    printf("Configuring timer for periodic measurements.\n");
     esp_timer_create_args_t i2cTimerArgs;
     i2cTimerArgs.name = "I2C Data Collection Timer";
     i2cTimerArgs.dispatch_method = ESP_TIMER_TASK;
@@ -177,7 +219,7 @@ esp_err_t mpu6050_init()
 
     esp_timer_create( &i2cTimerArgs, &i2cTimerHandle );
 
-    // Should configure the timer for every 100ms
+    // Should configure the timer to expire every 100ms
     esp_timer_start_periodic( i2cTimerHandle, 100000 );
 
     return esp_err;
@@ -203,75 +245,67 @@ void timerCallback(void* arg)
         accel_x_buffer[1] = accel_x_buffer[2];
         accel_x_buffer[2] = accel_x_buffer[3];
         accel_x_buffer[3] = accel_x_buffer[4];
-        accel_x_buffer[4] = (int16_t)(imu_data[0]<<8 | imu_data[1]);
+        accel_x_buffer[4] = ((double)(imu_data[0]<<8 | imu_data[1]))/accel_x_scale_factor;
 
         // Shift the data down in the buffer
         accel_y_buffer[0] = accel_y_buffer[1];
         accel_y_buffer[1] = accel_y_buffer[2];
         accel_y_buffer[2] = accel_y_buffer[3];
         accel_y_buffer[3] = accel_y_buffer[4];
-        accel_y_buffer[4] = (int16_t)(imu_data[2]<<8 | imu_data[3]);
+        accel_y_buffer[4] = ((double)(imu_data[2]<<8 | imu_data[3]))/accel_y_scale_factor;
 
         // Shift the data down in the buffer
         accel_z_buffer[0] = accel_z_buffer[1];
         accel_z_buffer[1] = accel_z_buffer[2];
         accel_z_buffer[2] = accel_z_buffer[3];
         accel_z_buffer[3] = accel_z_buffer[4];
-        accel_z_buffer[4] = (int16_t)(imu_data[4]<<8 | imu_data[5]);
-        
+        accel_z_buffer[4] = ((double)(imu_data[4]<<8 | imu_data[5]))/accel_z_scale_factor;
+
         // Shift the data down in the buffer
         temp_data_buffer[0] = temp_data_buffer[1];
         temp_data_buffer[1] = temp_data_buffer[2];
         temp_data_buffer[2] = temp_data_buffer[3];
         temp_data_buffer[3] = temp_data_buffer[4];
-        temp_data_buffer[4] = (int16_t)(imu_data[6]<<8 | imu_data[7]) - temp_data_offset;
+        temp_data_buffer[4] = (int16_t)((( (((int32_t)(imu_data[6]<<8 | imu_data[7])) << 5) / (340 << 5) ) + 0x491) >> 5); // Fixed point representation of the equation found in the MPU6050 datasheet
 
         // Shift the data down in the buffer
         gyro_x_buffer[0] = gyro_x_buffer[1];
         gyro_x_buffer[1] = gyro_x_buffer[2];
         gyro_x_buffer[2] = gyro_x_buffer[3];
         gyro_x_buffer[3] = gyro_x_buffer[4];
-        gyro_x_buffer[4] = (int16_t)(imu_data[8]<<8 | imu_data[9]) - gyro_x_offset;
+        gyro_x_buffer[4] = (int16_t)(( (((int32_t)((int16_t)(imu_data[8]<<8 | imu_data[9]) - gyro_x_offset)) << 1) / GYRO_LSB_SENSITIVITY) >> 1);
 
         // Shift the data down in the buffer
         gyro_y_buffer[0] = gyro_y_buffer[1];
         gyro_y_buffer[1] = gyro_y_buffer[2];
         gyro_y_buffer[2] = gyro_y_buffer[3];
         gyro_y_buffer[3] = gyro_y_buffer[4];
-        gyro_y_buffer[4] = (int16_t)(imu_data[10]<<8 | imu_data[11]) - gyro_y_offset;
+        gyro_y_buffer[4] = (int16_t)(( (((int32_t)((int16_t)(imu_data[10]<<8 | imu_data[11]) - gyro_y_offset)) << 1) / GYRO_LSB_SENSITIVITY) >> 1);
 
         // Shift the data down in the buffer
         gyro_z_buffer[0] = gyro_z_buffer[1];
         gyro_z_buffer[1] = gyro_z_buffer[2];
         gyro_z_buffer[2] = gyro_z_buffer[3];
         gyro_z_buffer[3] = gyro_z_buffer[4];
-        gyro_z_buffer[4] = (int16_t)(imu_data[12]<<8 | imu_data[13]) - gyro_z_offset;
+        gyro_z_buffer[4] = (int16_t)(( (((int32_t)((int16_t)(imu_data[12]<<8 | imu_data[13]) - gyro_z_offset)) << 1) / GYRO_LSB_SENSITIVITY) >> 1);
 
         // See if this takes too long
-        FilterData(accel_x_buffer, BUFFER_SAMPLES, &accel_x_output_filtered);
-        FilterData(accel_y_buffer, BUFFER_SAMPLES, &accel_y_output_filtered);
-        FilterData(accel_z_buffer, BUFFER_SAMPLES, &accel_z_output_filtered);
+        FilterDataFloating(accel_x_buffer, BUFFER_SAMPLES, &accel_x_output); // Need to create this function
+        FilterDataFloating(accel_y_buffer, BUFFER_SAMPLES, &accel_y_output);
+        FilterDataFloating(accel_z_buffer, BUFFER_SAMPLES, &accel_z_output);
         FilterData(temp_data_buffer, BUFFER_SAMPLES, &temp_data_output);
         FilterData(gyro_x_buffer, BUFFER_SAMPLES, &gyro_x_output);
         FilterData(gyro_y_buffer, BUFFER_SAMPLES, &gyro_y_output);
         FilterData(gyro_z_buffer, BUFFER_SAMPLES, &gyro_z_output);
 
-        accel_x_output = accel_x_output_filtered - accel_x_output_old;
-        accel_y_output = accel_y_output_filtered - accel_y_output_old;
-        accel_z_output = accel_z_output_filtered - accel_z_output_old;
-
-        accel_x_output_old = accel_x_output_filtered;
-        accel_y_output_old = accel_y_output_filtered;
-        accel_z_output_old = accel_z_output_filtered;
-
         // Make sure the data is above a minimum threshold. This prevents tiny
         // movement from effecting our data
-        accel_x_output = (accel_x_output < ACCEL_THRESHOLD) ? 0 : accel_x_output;
-        accel_y_output = (accel_y_output < ACCEL_THRESHOLD) ? 0 : accel_y_output;
-        accel_z_output = (accel_z_output < ACCEL_THRESHOLD) ? 0 : accel_z_output;
-        gyro_x_output = (gyro_x_output < GYRO_THRESHOLD) ? 0 : gyro_x_output;
-        gyro_y_output = (gyro_y_output < GYRO_THRESHOLD) ? 0 : gyro_y_output;
-        gyro_z_output = (gyro_z_output < GYRO_THRESHOLD) ? 0 : gyro_z_output;
+        accel_x_output = (-1*ACCEL_THRESHOLD < accel_x_output < ACCEL_THRESHOLD) ? 0 : accel_x_output;
+        accel_y_output = (-1*ACCEL_THRESHOLD < accel_y_output < ACCEL_THRESHOLD) ? 0 : accel_y_output;
+        accel_z_output = (-1*ACCEL_THRESHOLD < accel_z_output < ACCEL_THRESHOLD) ? 0 : accel_z_output;
+        gyro_x_output = (-1*GYRO_THRESHOLD < gyro_x_output < GYRO_THRESHOLD) ? 0 : gyro_x_output;
+        gyro_y_output = (-1*GYRO_THRESHOLD < gyro_y_output < GYRO_THRESHOLD) ? 0 : gyro_y_output;
+        gyro_z_output = (-1*GYRO_THRESHOLD < gyro_z_output < GYRO_THRESHOLD) ? 0 : gyro_z_output;
 
         printf("accel_x_output: %d\n", accel_x_output);
         printf("accel_y_output: %d\n", accel_y_output);
@@ -279,6 +313,7 @@ void timerCallback(void* arg)
         printf("gyro_x_output: %d\n", gyro_x_output);
         printf("gyro_y_output: %d\n", gyro_y_output);
         printf("gyro_z_output: %d\n", gyro_z_output);
+        printf("temp_data_output: %d\n", temp_data_output);
 
     }
     else
