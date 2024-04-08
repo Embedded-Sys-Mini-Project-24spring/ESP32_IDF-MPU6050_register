@@ -1,5 +1,5 @@
-#include "esp_err.h"  
-#include "driver/i2c.h" 
+#include "esp_err.h"
+#include "driver/i2c.h"
 
 #define MPU6050_I2C_SDA 19
 #define MPU6050_I2C_SCL 18
@@ -429,4 +429,4 @@ esp_err_t mpu6050_init();
 /**
 * @brief 读取加速度计、温度和陀螺仪数据
 */
-measurement_out_t mpu6050_get_value();
+void mpu6050_get_value();
