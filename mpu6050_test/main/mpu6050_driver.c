@@ -5,7 +5,7 @@
 #define IMU_DATA_SIZE_BYTES 14
 #define BUFFER_SAMPLES 5
 #define OFFSET_LOOP 200
-#define ACCEL_THRESHOLD 50
+#define ACCEL_THRESHOLD .01
 #define GYRO_THRESHOLD 4
 #define GYRO_LSB_SENSITIVITY  0x83 // Pulled from MPU6050 datasheet (Fixed point representation)
 #define ACCEL_LSB_SENSITIVITY 16384 // Pulled from MPU6050 datasheet
@@ -33,9 +33,9 @@ int16_t gyro_z_offset = 0;
 
 // The final acceleration values that can be used for
 // calculations
-int16_t accel_x_output;
-int16_t accel_y_output;
-int16_t accel_z_output;
+double accel_x_output;
+double accel_y_output;
+double accel_z_output;
 
 int16_t accel_x_scale_factor = ACCEL_LSB_SENSITIVITY;
 int16_t accel_y_scale_factor = ACCEL_LSB_SENSITIVITY;
@@ -245,21 +245,21 @@ void timerCallback(void* arg)
         accel_x_buffer[1] = accel_x_buffer[2];
         accel_x_buffer[2] = accel_x_buffer[3];
         accel_x_buffer[3] = accel_x_buffer[4];
-        accel_x_buffer[4] = ((double)(imu_data[0]<<8 | imu_data[1]))/accel_x_scale_factor;
+        accel_x_buffer[4] = ((double)((int16_t)(imu_data[0]<<8 | imu_data[1])))/accel_x_scale_factor;
 
         // Shift the data down in the buffer
         accel_y_buffer[0] = accel_y_buffer[1];
         accel_y_buffer[1] = accel_y_buffer[2];
         accel_y_buffer[2] = accel_y_buffer[3];
         accel_y_buffer[3] = accel_y_buffer[4];
-        accel_y_buffer[4] = ((double)(imu_data[2]<<8 | imu_data[3]))/accel_y_scale_factor;
+        accel_y_buffer[4] = ((double)((int16_t)(imu_data[2]<<8 | imu_data[3])))/accel_y_scale_factor;
 
         // Shift the data down in the buffer
         accel_z_buffer[0] = accel_z_buffer[1];
         accel_z_buffer[1] = accel_z_buffer[2];
         accel_z_buffer[2] = accel_z_buffer[3];
         accel_z_buffer[3] = accel_z_buffer[4];
-        accel_z_buffer[4] = ((double)(imu_data[4]<<8 | imu_data[5]))/accel_z_scale_factor;
+        accel_z_buffer[4] = ((double)((int16_t)(imu_data[4]<<8 | imu_data[5])))/accel_z_scale_factor;
 
         // Shift the data down in the buffer
         temp_data_buffer[0] = temp_data_buffer[1];
@@ -290,7 +290,7 @@ void timerCallback(void* arg)
         gyro_z_buffer[4] = (int16_t)(( (((int32_t)((int16_t)(imu_data[12]<<8 | imu_data[13]) - gyro_z_offset)) << 1) / GYRO_LSB_SENSITIVITY) >> 1);
 
         // See if this takes too long
-        FilterDataFloating(accel_x_buffer, BUFFER_SAMPLES, &accel_x_output); // Need to create this function
+        FilterDataFloating(accel_x_buffer, BUFFER_SAMPLES, &accel_x_output);
         FilterDataFloating(accel_y_buffer, BUFFER_SAMPLES, &accel_y_output);
         FilterDataFloating(accel_z_buffer, BUFFER_SAMPLES, &accel_z_output);
         FilterData(temp_data_buffer, BUFFER_SAMPLES, &temp_data_output);
@@ -300,16 +300,16 @@ void timerCallback(void* arg)
 
         // Make sure the data is above a minimum threshold. This prevents tiny
         // movement from effecting our data
-        accel_x_output = (-1*ACCEL_THRESHOLD < accel_x_output < ACCEL_THRESHOLD) ? 0 : accel_x_output;
-        accel_y_output = (-1*ACCEL_THRESHOLD < accel_y_output < ACCEL_THRESHOLD) ? 0 : accel_y_output;
-        accel_z_output = (-1*ACCEL_THRESHOLD < accel_z_output < ACCEL_THRESHOLD) ? 0 : accel_z_output;
-        gyro_x_output = (-1*GYRO_THRESHOLD < gyro_x_output < GYRO_THRESHOLD) ? 0 : gyro_x_output;
-        gyro_y_output = (-1*GYRO_THRESHOLD < gyro_y_output < GYRO_THRESHOLD) ? 0 : gyro_y_output;
-        gyro_z_output = (-1*GYRO_THRESHOLD < gyro_z_output < GYRO_THRESHOLD) ? 0 : gyro_z_output;
+        accel_x_output = ((-1*ACCEL_THRESHOLD) < accel_x_output && accel_x_output < ACCEL_THRESHOLD) ? 0 : accel_x_output;
+        accel_y_output = ((-1*ACCEL_THRESHOLD) < accel_y_output && accel_y_output < ACCEL_THRESHOLD) ? 0 : accel_y_output;
+        accel_z_output = ((-1*ACCEL_THRESHOLD) < accel_z_output && accel_z_output < ACCEL_THRESHOLD) ? 0 : accel_z_output;
+        gyro_x_output = ((-1*GYRO_THRESHOLD) < gyro_x_output && gyro_x_output < GYRO_THRESHOLD) ? 0 : gyro_x_output;
+        gyro_y_output = ((-1*GYRO_THRESHOLD) < gyro_y_output && gyro_y_output < GYRO_THRESHOLD) ? 0 : gyro_y_output;
+        gyro_z_output = ((-1*GYRO_THRESHOLD) < gyro_z_output && gyro_z_output < GYRO_THRESHOLD) ? 0 : gyro_z_output;
 
-        printf("accel_x_output: %d\n", accel_x_output);
-        printf("accel_y_output: %d\n", accel_y_output);
-        printf("accel_z_output: %d\n", accel_z_output);
+        printf("accel_x_output: %lf\n", accel_x_output);
+        printf("accel_y_output: %lf\n", accel_y_output);
+        printf("accel_z_output: %lf\n", accel_z_output);
         printf("gyro_x_output: %d\n", gyro_x_output);
         printf("gyro_y_output: %d\n", gyro_y_output);
         printf("gyro_z_output: %d\n", gyro_z_output);
